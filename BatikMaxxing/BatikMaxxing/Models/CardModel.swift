@@ -6,3 +6,15 @@
 //
 
 import Foundation
+
+struct CardModel: Identifiable, Hashable {
+    let id = UUID()
+
+    let title: String
+
+    let assets: [AssetModel]
+
+    var previewAssets: [AssetModel] {
+        Array(assets.prefix(5))
+    }
+}

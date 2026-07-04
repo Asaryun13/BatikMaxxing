@@ -8,11 +8,38 @@
 import SwiftUI
 
 struct CardRowView: View {
-    var body: some View {
-        Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
-    }
-}
 
-#Preview {
-    CardRowView()
+    let card: CardModel
+
+    var body: some View {
+
+        VStack(alignment: .leading, spacing: 12) {
+
+            HStack {
+
+                Text(card.title)
+                    .font(.headline)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.blue)
+
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(card.previewAssets) { asset in
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(.gray)
+                            .frame(width: 120, height: 120)
+                    }
+                }
+            }
+            .frame(height: 130)
+
+        }
+
+    }
+
 }
