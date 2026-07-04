@@ -14,5 +14,6 @@ struct BatikMaxxingApp: App {
         WindowGroup {
             HomeView()
         }
+        .modelContainer(for: CanvasModel.self)
     }
 }
