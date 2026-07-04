@@ -34,17 +34,26 @@ import SwiftUI
 //    }
 //}
 
+//
+//  HomeView.swift
+//  BatikMaxxing
+//
+//  Halaman utama aplikasi ("All Outfit"). View ini hanya bertanggung jawab
+//  atas layout dan binding ke HomeViewModel — semua state & logic ada di
+//  ViewModels/HomeViewModel.swift.
+//
+
 import SwiftUI
 import SwiftData
 
 struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
 
-    // Otomatis ter-update setiap kali ada canvas baru/terhapus/terupdate.
+    // @Query wajib tinggal di View — lihat catatan arsitektur di HomeViewModel.
     @Query(sort: \CanvasModel.updatedAt, order: .reverse)
     private var canvases: [CanvasModel]
 
-    @State private var searchText = ""
+    @State private var viewModel = HomeViewModel()
     @State private var navigationPath = NavigationPath()
 
     private let gridColumns = [
@@ -53,9 +62,7 @@ struct HomeView: View {
     ]
 
     private var filteredCanvases: [CanvasModel] {
-        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return canvases }
-        return canvases.filter { $0.name.localizedCaseInsensitiveContains(trimmed) }
+        viewModel.filteredCanvases(from: canvases)
     }
 
     var body: some View {
@@ -82,6 +89,35 @@ struct HomeView: View {
             .navigationBarHidden(true)
             .navigationDestination(for: CanvasModel.self) { project in
                 CanvasView(project: project)
+            }
+        }
+        .alert(
+            "Rename Canvas",
+            isPresented: $viewModel.isRenamePresented
+        ) {
+            TextField("Name", text: $viewModel.renameText)
+                .autocorrectionDisabled()
+
+            Button("Cancel", role: .cancel) {
+                viewModel.cancelRename()
+            }
+
+            Button("Save") {
+                viewModel.commitRename(in: modelContext)
+            }
+        } message: {
+            Text("Enter a new name for this canvas.")
+        }
+        .confirmationDialog(
+            viewModel.deleteConfirmationTitle,
+            isPresented: $viewModel.isDeleteConfirmationPresented,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                viewModel.commitDelete(in: modelContext)
+            }
+            Button("Cancel", role: .cancel) {
+                viewModel.cancelDelete()
             }
         }
     }
@@ -115,7 +151,7 @@ struct HomeView: View {
     private var noResultsView: some View {
         VStack {
             Spacer()
-            Text("No results for \"\(searchText)\"")
+            Text("No results for \"\(viewModel.searchText)\"")
                 .font(.system(size: 16))
                 .foregroundStyle(.secondary)
             Spacer()
@@ -133,12 +169,57 @@ struct HomeView: View {
                         CanvasCardView(project: project)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        cardContextMenu(for: project)
+                    }
                 }
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 110) // ruang untuk bottom bar yang mengambang
         }
         .scrollIndicators(.hidden)
+    }
+
+    // MARK: - Context menu
+
+    @ViewBuilder
+    private func cardContextMenu(for project: CanvasModel) -> some View {
+        Button {
+            viewModel.beginRename(project)
+        } label: {
+            Label("Rename", systemImage: "pencil")
+        }
+
+        Button {
+            viewModel.duplicate(project, in: modelContext)
+        } label: {
+            Label("Duplicate", systemImage: "plus.square.on.square")
+        }
+
+        shareButton(for: project)
+
+        Button(role: .destructive) {
+            viewModel.requestDelete(project)
+        } label: {
+            Label("Delete", systemImage: "trash")
+        }
+    }
+
+    @ViewBuilder
+    private func shareButton(for project: CanvasModel) -> some View {
+        if let data = project.thumbnailData, let uiImage = UIImage(data: data) {
+            ShareLink(
+                item: Image(uiImage: uiImage),
+                preview: SharePreview(project.name, image: Image(uiImage: uiImage))
+            ) {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+        } else {
+            // Belum ada thumbnail (canvas masih kosong) — share nama saja dulu.
+            ShareLink(item: project.name) {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+        }
     }
 
     // MARK: - Bottom bar (search + create)
@@ -149,7 +230,7 @@ struct HomeView: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
 
-                TextField("Search", text: $searchText)
+                TextField("Search", text: $viewModel.searchText)
                     .autocorrectionDisabled()
 
                 Image(systemName: "mic.fill")
@@ -162,7 +243,8 @@ struct HomeView: View {
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
 
             Button {
-                createNewCanvas()
+                let newProject = viewModel.createCanvas(in: modelContext)
+                navigationPath.append(newProject)
             } label: {
                 Image(systemName: "square.and.pencil")
                     .font(.system(size: 18, weight: .medium))
@@ -174,14 +256,6 @@ struct HomeView: View {
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 8)
-    }
-
-    // MARK: - Actions
-
-    private func createNewCanvas() {
-        let newProject = CanvasModel()
-        modelContext.insert(newProject)
-        navigationPath.append(newProject)
     }
 }
 
@@ -199,9 +273,4 @@ struct HomeView: View {
 #Preview("Empty state") {
     HomeView()
         .modelContainer(for: CanvasModel.self, inMemory: true)
-}
-
-
-#Preview {
-    HomeView()
 }
