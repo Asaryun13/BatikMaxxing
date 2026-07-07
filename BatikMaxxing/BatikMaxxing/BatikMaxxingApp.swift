@@ -14,6 +14,9 @@ struct BatikMaxxingApp: App {
         WindowGroup {
             HomeView()
         }
-        .modelContainer(for: CanvasModel.self)
+        .modelContainer(
+            for: [CanvasModel.self, CanvasLayerModel.self],
+            isUndoEnabled: true
+        )
     }
 }

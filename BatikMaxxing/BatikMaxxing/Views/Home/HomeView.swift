@@ -5,39 +5,6 @@
 //  Created by Joey Martin on 03/07/26.
 //
 
-import SwiftUI
-
-//struct HomeView: View {
-//    let columns = [
-//        GridItem(.flexible(), spacing: 16),
-//        GridItem(.flexible(), spacing: 16)
-//    ]
-//    
-//    @State private var searchText = ""
-//    
-//    var body: some View {
-//        NavigationStack {
-//            ZStack(alignment: .bottom) {
-//                ScrollView {
-//                    LazyVGrid(columns: columns, spacing: 16) {
-//                        ForEach(0..<4, id: \.self) { _ in
-//                            OutfitCardView()
-//                        }
-//                    }
-//                    .padding(.horizontal)
-//                    .padding(.bottom, 90)
-//                }
-//                .navigationTitle("All Outfit")
-//                BottomSearchBar(searchText: $searchText)
-//            }
-//        }
-//    }
-//}
-
-//
-//  HomeView.swift
-//  BatikMaxxing
-//
 //  Halaman utama aplikasi ("All Outfit"). View ini hanya bertanggung jawab
 //  atas layout dan binding ke HomeViewModel — semua state & logic ada di
 //  ViewModels/HomeViewModel.swift.
@@ -88,7 +55,7 @@ struct HomeView: View {
             }
             .navigationBarHidden(true)
             .navigationDestination(for: CanvasModel.self) { project in
-                CanvasView(project: project)
+                CanvasView(project: project, navigationPath: $navigationPath)
             }
         }
         .alert(
@@ -260,17 +227,24 @@ struct HomeView: View {
 }
 
 #Preview("Ada canvas") {
-    let container = try! ModelContainer(
-        for: CanvasModel.self,
-        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
-    )
-    container.mainContext.insert(CanvasModel(name: "Untitled"))
-    container.mainContext.insert(CanvasModel(name: "Untitled"))
-    return HomeView()
-        .modelContainer(container)
+    HomeView()
+        .modelContainer(previewContainerWithSampleCanvases())
 }
 
 #Preview("Empty state") {
     HomeView()
-        .modelContainer(for: CanvasModel.self, inMemory: true)
+        .modelContainer(for: [CanvasModel.self, CanvasLayerModel.self], inMemory: true)
+}
+
+/// Terpisah dari closure `#Preview` karena `#Preview` pakai `@ViewBuilder`
+/// juga (seperti `body`) — tidak boleh ada statement biasa yang me-return
+/// `Void` (mis. `context.insert(...)`) langsung di dalamnya.
+private func previewContainerWithSampleCanvases() -> ModelContainer {
+    let container = try! ModelContainer(
+        for: CanvasModel.self, CanvasLayerModel.self,
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
+    container.mainContext.insert(CanvasModel(name: "Untitled"))
+    container.mainContext.insert(CanvasModel(name: "Untitled"))
+    return container
 }

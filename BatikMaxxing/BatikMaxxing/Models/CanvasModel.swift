@@ -5,6 +5,11 @@
 //  Created by Liecardo on 04/07/26.
 //
 
+//  Model persisten untuk satu "canvas" (project outfit) yang dibuat user.
+//  Menggunakan SwiftData supaya list canvas otomatis ter-update di UI (via @Query)
+//  setiap kali ada perubahan (create/update/delete) tanpa perlu ViewModel manual.
+//
+
 import Foundation
 import SwiftData
 
@@ -21,10 +26,11 @@ final class CanvasModel {
     @Attribute(.externalStorage)
     var thumbnailData: Data?
 
-    // NOTE: Di step berikutnya (saat membangun CanvasView), kita akan tambahkan
-    // relasi ke layer-layer gambar (foto badan, atasan, bawahan) beserta
-    // posisi/rotasi/skala masing-masing. Untuk saat ini model hanya menyimpan
-    // metadata yang dibutuhkan halaman utama.
+    /// Semua foto (badan, atasan, bawahan, dll) yang ditempel di canvas ini.
+    /// `.cascade` supaya menghapus CanvasModel otomatis menghapus semua
+    /// layer-nya juga (tidak ada layer yatim tersisa di database).
+    @Relationship(deleteRule: .cascade, inverse: \CanvasLayerModel.canvas)
+    var layers: [CanvasLayerModel] = []
 
     init(
         id: UUID = UUID(),
@@ -38,5 +44,6 @@ final class CanvasModel {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.thumbnailData = thumbnailData
+        self.layers = []
     }
 }
