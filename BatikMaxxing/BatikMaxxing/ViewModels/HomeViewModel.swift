@@ -5,7 +5,6 @@
 //  Created by Joey Martin on 03/07/26.
 //
 
-//
 //  Semua state dan logic untuk HomeView dipindahkan ke sini:
 //  search/filter, alur rename, alur delete, dan aksi create/duplicate.
 //
@@ -98,14 +97,29 @@ final class HomeViewModel {
     // MARK: - Duplicate
 
     func duplicate(_ project: CanvasModel, in context: ModelContext) {
-        // NOTE: saat ini hanya menyalin metadata + thumbnail. Setelah
-        // CanvasView punya data layer sungguhan, method ini perlu di-update
-        // supaya deep-copy layer-layernya juga.
         let copy = CanvasModel(
             name: "\(project.name) copy",
             thumbnailData: project.thumbnailData
         )
         context.insert(copy)
+
+        // Deep-copy semua layer (foto badan/atasan/bawahan/dll) supaya
+        // hasil duplicate benar-benar identik, bukan cuma metadata-nya.
+        for layer in project.layers {
+            let layerCopy = CanvasLayerModel(
+                kind: layer.kind,
+                positionX: layer.positionX,
+                positionY: layer.positionY,
+                width: layer.width,
+                height: layer.height,
+                rotation: layer.rotation,
+                zIndex: layer.zIndex,
+                imageData: layer.imageData
+            )
+            context.insert(layerCopy)
+            layerCopy.canvas = copy
+        }
+
         save(context)
     }
 
