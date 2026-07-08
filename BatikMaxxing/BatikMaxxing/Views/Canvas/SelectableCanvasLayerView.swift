@@ -20,23 +20,35 @@
 //  norak di canvas), tapi area yang bisa DISENTUH dibuat 44x44pt (standar
 //  minimum Apple HIG) lewat frame tak terlihat di sekeliling lingkaran.
 //
-//  Live gesture state (liveDrag/liveScale/liveRotationDelta) SEMUANYA
-//  `@State` biasa (BUKAN `@GestureState`), dan di-reset MANUAL di baris
-//  yang SAMA dengan commit ke model di `.onEnded` — supaya urutannya pasti
-//  atomic (tidak ada race dengan auto-reset `@GestureState` yang timing-nya
-//  tidak sepenuhnya kita kendalikan, yang bisa menyebabkan kedipan
-//  "balik sebentar lalu maju lagi").
+//  Live gesture state (liveDrag/liveScale) SEMUANYA `@State` biasa (BUKAN
+//  `@GestureState`), dan di-reset MANUAL di baris yang SAMA dengan commit
+//  ke model di `.onEnded` — supaya urutannya pasti atomic.
 //
-//  NOTE soal rotasi: `.rotationEffect` di SwiftUI itu efek render, bukan
-//  transform UIKit asli — jadi translation dari DragGesture TIDAK otomatis
-//  ikut ter-rotate. Makanya untuk resize/rotate, translation mentah dari
-//  gesture di-konversi manual pakai trigonometri ke "local space" si layer.
+//  KUNCI fix reposition (smooth): `dragGesture` ditempel PALING LUAR,
+//  SETELAH `.rotationEffect` dan `.position()` — jadi `value.translation`
+//  otomatis dilaporkan dalam koordinat parent/canvas, tanpa perlu konversi
+//  trigonometri manual sama sekali.
+//
+//  KUNCI fix rotate (smooth): rotateGesture pakai
+//  `DragGesture(coordinateSpace: .global)`, supaya `value.location`/
+//  `startLocation` langsung dalam koordinat global asli — bisa
+//  dibandingkan langsung dengan `layerCenter` (dilacak via
+//  `geo.frame(in: .global)`) tanpa aproksimasi apa pun. Sebelumnya kode
+//  mencoba mengaproksimasi posisi jari global dengan menjumlahkan
+//  `value.startLocation` (koordinat LOKAL milik handle kecil, rentang
+//  ~0-44pt) ke `layerCenter` — itu salah secara geometris dan errornya
+//  signifikan karena skalanya sama order dengan `rotateHandleDistance`.
+//
+//  NOTE: resizeGesture MASIH pakai konversi trigonometri manual (global ->
+//  local) karena gesture-nya tetap ditempel di dalam hierarchy yang kena
+//  `.rotationEffect` (lewat handle di corner). Ini sudah dikonfirmasi jalan
+//  dengan benar sebelumnya — sengaja tidak diubah supaya tidak ada regresi.
 //
 
 import SwiftUI
 
 struct SelectableCanvasLayerView: View {
-    
+
     let layer: CanvasLayerModel
     let isSelected: Bool
     let onSelect: () -> Void
@@ -54,7 +66,6 @@ struct SelectableCanvasLayerView: View {
     // Sengaja @State biasa, bukan @GestureState (lihat catatan di atas).
     @State private var liveDrag: CGSize = .zero
     @State private var liveScale: CGFloat = 1.0
-    @State private var liveRotationDelta: Angle = .zero
 
     // Guard supaya onSelect() cuma dipanggil SEKALI per gesture drag,
     // walau propagasi `isSelected` dari parent belum tentu instan.
@@ -62,8 +73,17 @@ struct SelectableCanvasLayerView: View {
 
     // Snapshot nilai model di awal gesture resize (untuk hitung scale factor).
     @State private var resizeBaseSize: CGSize?
-    // Snapshot rotasi model di awal gesture rotate.
-    @State private var rotationBaseDegrees: Double?
+
+    // Snapshot di awal gesture rotate: rotasi model + sudut jari (global)
+    // relatif terhadap titik tengah layer, keduanya diperlukan untuk
+    // menghitung delta rotasi yang presisi sepanjang gesture.
+    @State private var rotationStartAngle: Double?
+    @State private var rotationStartFingerAngle: Double?
+
+    /// Titik tengah layer dalam koordinat GLOBAL (layar), dilacak lewat
+    /// GeometryReader supaya rotateGesture bisa hitung sudut jari yang
+    /// akurat — lihat catatan fix rotate di atas.
+    @State private var layerCenter: CGPoint = .zero
 
     private let handleVisualSize: CGFloat = 26
     private let handleTouchSize: CGFloat = 44
@@ -78,78 +98,103 @@ struct SelectableCanvasLayerView: View {
         let width = CGFloat(layer.width)
         let height = CGFloat(layer.height)
 
-        ZStack {
+        GeometryReader { proxy in
 
-            // MARK: Image
+            ZStack {
 
-            imageView
-                .frame(width: width, height: height)
-                .scaleEffect(liveScale)
+                imageView
+                    .frame(width: width, height: height)
+                    .scaleEffect(liveScale)
 
-            // MARK: Selection UI
+                if isSelected {
 
-            if isSelected {
+                    Rectangle()
+                        .stroke(Color.accentColor, lineWidth: 1.5)
+                        .frame(
+                            width: width * liveScale,
+                            height: height * liveScale
+                        )
+                        .allowsHitTesting(false)
 
-                Rectangle()
-                    .stroke(Color.accentColor, lineWidth: 1.5)
-                    .frame(
-                        width: width * liveScale,
-                        height: height * liveScale
-                    )
-                    .allowsHitTesting(false)
+                    Rectangle()
+                        .fill(Color.accentColor)
+                        .frame(width: 1, height: rotateHandleDistance)
+                        .offset(
+                            y: -(height * liveScale)/2 - rotateHandleDistance/2
+                        )
+                        .allowsHitTesting(false)
 
-                Rectangle()
-                    .fill(Color.accentColor)
-                    .frame(width: 1, height: rotateHandleDistance)
-                    .offset(
-                        y: -(height * liveScale)/2 - rotateHandleDistance/2
-                    )
-                    .allowsHitTesting(false)
+                    rotateHandleView
+                        .offset(
+                            y: -(height * liveScale)/2 - rotateHandleDistance
+                        )
 
-                rotateHandleView
-                    .offset(
-                        y: -(height * liveScale)/2 - rotateHandleDistance
-                    )
+                    cornerHandleView(sx: -1, sy: -1)
+                        .offset(
+                            x: -(width * liveScale)/2,
+                            y: -(height * liveScale)/2
+                        )
 
-                cornerHandleView(sx: -1, sy: -1)
-                    .offset(
-                        x: -(width * liveScale)/2,
-                        y: -(height * liveScale)/2
-                    )
+                    cornerHandleView(sx: 1, sy: -1)
+                        .offset(
+                            x: (width * liveScale)/2,
+                            y: -(height * liveScale)/2
+                        )
 
-                cornerHandleView(sx: 1, sy: -1)
-                    .offset(
-                        x: (width * liveScale)/2,
-                        y: -(height * liveScale)/2
-                    )
+                    cornerHandleView(sx: -1, sy: 1)
+                        .offset(
+                            x: -(width * liveScale)/2,
+                            y: (height * liveScale)/2
+                        )
 
-                cornerHandleView(sx: -1, sy: 1)
-                    .offset(
-                        x: -(width * liveScale)/2,
-                        y: (height * liveScale)/2
-                    )
+                    cornerHandleView(sx: 1, sy: 1)
+                        .offset(
+                            x: (width * liveScale)/2,
+                            y: (height * liveScale)/2
+                        )
+                }
 
-                cornerHandleView(sx: 1, sy: 1)
-                    .offset(
-                        x: (width * liveScale)/2,
-                        y: (height * liveScale)/2
-                    )
             }
+            .frame(
+                width: width + margin * 2,
+                height: height + margin * 2
+            )
+            .background {
+
+                GeometryReader { geo in
+
+                    Color.clear
+                        .onAppear {
+
+                            let frame = geo.frame(in: .global)
+
+                            layerCenter = CGPoint(
+                                x: frame.midX,
+                                y: frame.midY
+                            )
+                        }
+                        .onChange(of: geo.frame(in: .global)) { _, newFrame in
+
+                            layerCenter = CGPoint(
+                                x: newFrame.midX,
+                                y: newFrame.midY
+                            )
+                        }
+
+                }
+
+            }
+            .contentShape(Rectangle())
+            .rotationEffect(
+                Angle(degrees: layer.rotation)
+            )
+            .position(
+                x: CGFloat(layer.positionX) + liveDrag.width,
+                y: CGFloat(layer.positionY) + liveDrag.height
+            )
+            .gesture(dragGesture)
 
         }
-        .frame(
-            width: width + margin * 2,
-            height: height + margin * 2
-        )
-        .contentShape(Rectangle())
-        .rotationEffect(
-            Angle(degrees: layer.rotation) + liveRotationDelta
-        )
-        .position(
-            x: CGFloat(layer.positionX) + liveDrag.width,
-            y: CGFloat(layer.positionY) + liveDrag.height
-        )
-        .gesture(dragGesture)
     }
 
     @ViewBuilder
@@ -176,20 +221,11 @@ struct SelectableCanvasLayerView: View {
     }
 
     // MARK: - Reposition (drag body) — select + drag jadi SATU gesture,
-    // minimumDistance 0 supaya langsung merespons sejak sentuhan pertama
-    // (tidak ada lagi TapGesture terpisah yang bikin SwiftUI "menunggu"
-    // untuk disambiguasi tap-vs-drag).
+    // minimumDistance 0 supaya langsung merespons sejak sentuhan pertama.
 
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                print("""
-                ---------------------
-                location      : \(value.location)
-                startLocation : \(value.startLocation)
-                translation   : \(value.translation)
-                """)
-
                 if !didSelectInCurrentDrag {
                     didSelectInCurrentDrag = true
                     if !isSelected {
@@ -242,9 +278,13 @@ struct SelectableCanvasLayerView: View {
     }
 
     // MARK: - Resize (drag salah satu handle pojok, proporsional)
+    //
+    // Masih pakai konversi trigonometri manual (global -> local) karena
+    // gesture ini tetap ditempel di dalam hierarchy yang kena
+    // `.rotationEffect`. Sudah dikonfirmasi jalan benar — tidak diubah.
 
     private func resizeGesture(sx: Double, sy: Double) -> some Gesture {
-        DragGesture(minimumDistance: 10)
+        DragGesture(minimumDistance: 0)
             .onChanged { value in
                 if resizeBaseSize == nil {
                     resizeBaseSize = CGSize(width: layer.width, height: layer.height)
@@ -252,8 +292,6 @@ struct SelectableCanvasLayerView: View {
                 }
                 guard let base = resizeBaseSize else { return }
 
-                // Konversi translation mentah (screen space) ke local space
-                // si layer, supaya resize tetap benar walau layer lagi rotated.
                 let radians = layer.rotation * .pi / 180
                 let cosT = cos(radians)
                 let sinT = sin(radians)
@@ -285,34 +323,43 @@ struct SelectableCanvasLayerView: View {
     }
 
     // MARK: - Rotate (drag handle di atas)
+    //
+    // FIX: pakai coordinateSpace .global, supaya value.location/
+    // startLocation adalah posisi jari SESUNGGUHNYA di layar — tinggal
+    // dibandingkan langsung dengan layerCenter (juga global). Tidak ada
+    // lagi pendekatan/aproksimasi koordinat.
 
     private func rotateGesture() -> some Gesture {
-        DragGesture(minimumDistance: 0)
+        DragGesture(minimumDistance: 0, coordinateSpace: .global)
             .onChanged { value in
-                if rotationBaseDegrees == nil {
-                    rotationBaseDegrees = layer.rotation
+                if rotationStartAngle == nil {
+                    rotationStartAngle = layer.rotation
+                    rotationStartFingerAngle = atan2(
+                        value.startLocation.y - layerCenter.y,
+                        value.startLocation.x - layerCenter.x
+                    )
                     beginInteraction()
                 }
 
-                // Vektor dari titik tengah layer ke handle, dalam local
-                // space (belum ke-rotate) — handle selalu mulai tepat di
-                // atas titik tengah.
-                let halfHeight = layer.height / 2
-                let baseVector = (x: 0.0, y: -(halfHeight + Double(rotateHandleDistance)))
-                let currentVector = (
-                    x: baseVector.x + Double(value.translation.width),
-                    y: baseVector.y + Double(value.translation.height)
+                guard
+                    let startRotation = rotationStartAngle,
+                    let startFingerAngle = rotationStartFingerAngle
+                else {
+                    return
+                }
+
+                let currentFingerAngle = atan2(
+                    value.location.y - layerCenter.y,
+                    value.location.x - layerCenter.x
                 )
 
-                let deltaRadians = atan2(currentVector.y, currentVector.x)
-                    - atan2(baseVector.y, baseVector.x)
-                liveRotationDelta = Angle(radians: deltaRadians)
+                let delta = currentFingerAngle - startFingerAngle
+                layer.rotation = startRotation + delta * 180 / .pi
             }
             .onEnded { _ in
-                let base = rotationBaseDegrees ?? layer.rotation
-                layer.rotation = base + liveRotationDelta.degrees
-                liveRotationDelta = .zero
-                rotationBaseDegrees = nil
+                rotationStartAngle = nil
+                rotationStartFingerAngle = nil
+
                 endInteraction()
                 onGestureEnd()
             }
