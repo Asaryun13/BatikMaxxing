@@ -3,7 +3,7 @@
 //  BatikMaxxing
 //
 //  Created by Liecardo on 05/07/26.
-//
+//  Edited by Asaryun on 09/07/26
 
 //  Satu layer (foto) di canvas yang bisa di-tap untuk select, di-drag untuk
 //  reposition, di-resize lewat 4 handle pojok (proporsional, menjaga aspect
@@ -44,7 +44,6 @@
 //  `.rotationEffect` (lewat handle di corner). Ini sudah dikonfirmasi jalan
 //  dengan benar sebelumnya — sengaja tidak diubah supaya tidak ada regresi.
 //
-
 import SwiftUI
 
 struct SelectableCanvasLayerView: View {
@@ -62,32 +61,10 @@ struct SelectableCanvasLayerView: View {
     /// menonaktifkan pan gesture UIScrollView begitu gesture layer mulai.
     @Environment(\.scrollGestureController) private var scrollGestureController
 
-    // Live/interactive state — cuma visual, belum ditulis ke model.
-    // Sengaja @State biasa, bukan @GestureState (lihat catatan di atas).
-    @State private var liveDrag: CGSize = .zero
-    @State private var liveScale: CGFloat = 1.0
-
-    // Guard supaya onSelect() cuma dipanggil SEKALI per gesture drag,
-    // walau propagasi `isSelected` dari parent belum tentu instan.
-    @State private var didSelectInCurrentDrag = false
-
-    // Snapshot nilai model di awal gesture resize (untuk hitung scale factor).
-    @State private var resizeBaseSize: CGSize?
-
-    // Snapshot di awal gesture rotate: rotasi model + sudut jari (global)
-    // relatif terhadap titik tengah layer, keduanya diperlukan untuk
-    // menghitung delta rotasi yang presisi sepanjang gesture.
-    @State private var rotationStartAngle: Double?
-    @State private var rotationStartFingerAngle: Double?
-
-    /// Titik tengah layer dalam koordinat GLOBAL (layar), dilacak lewat
-    /// GeometryReader supaya rotateGesture bisa hitung sudut jari yang
-    /// akurat — lihat catatan fix rotate di atas.
-    @State private var layerCenter: CGPoint = .zero
+    @State private var viewModel = SelectableCanvasLayerViewModel()
 
     private let handleVisualSize: CGFloat = 26
     private let handleTouchSize: CGFloat = 44
-    private let minLayerSize: Double = 32
     private let rotateHandleDistance: CGFloat = 44
 
     /// Margin SIMETRIS di semua sisi (lihat catatan geometri di atas).
@@ -104,15 +81,15 @@ struct SelectableCanvasLayerView: View {
 
                 imageView
                     .frame(width: width, height: height)
-                    .scaleEffect(liveScale)
+                    .scaleEffect(viewModel.liveScale)
 
                 if isSelected {
 
                     Rectangle()
                         .stroke(Color.accentColor, lineWidth: 1.5)
                         .frame(
-                            width: width * liveScale,
-                            height: height * liveScale
+                            width: width * viewModel.liveScale,
+                            height: height * viewModel.liveScale
                         )
                         .allowsHitTesting(false)
 
@@ -120,37 +97,37 @@ struct SelectableCanvasLayerView: View {
                         .fill(Color.accentColor)
                         .frame(width: 1, height: rotateHandleDistance)
                         .offset(
-                            y: -(height * liveScale)/2 - rotateHandleDistance/2
+                            y: -(height * viewModel.liveScale)/2 - rotateHandleDistance/2
                         )
                         .allowsHitTesting(false)
 
                     rotateHandleView
                         .offset(
-                            y: -(height * liveScale)/2 - rotateHandleDistance
+                            y: -(height * viewModel.liveScale)/2 - rotateHandleDistance
                         )
 
                     cornerHandleView(sx: -1, sy: -1)
                         .offset(
-                            x: -(width * liveScale)/2,
-                            y: -(height * liveScale)/2
+                            x: -(width * viewModel.liveScale)/2,
+                            y: -(height * viewModel.liveScale)/2
                         )
 
                     cornerHandleView(sx: 1, sy: -1)
                         .offset(
-                            x: (width * liveScale)/2,
-                            y: -(height * liveScale)/2
+                            x: (width * viewModel.liveScale)/2,
+                            y: -(height * viewModel.liveScale)/2
                         )
 
                     cornerHandleView(sx: -1, sy: 1)
                         .offset(
-                            x: -(width * liveScale)/2,
-                            y: (height * liveScale)/2
+                            x: -(width * viewModel.liveScale)/2,
+                            y: (height * viewModel.liveScale)/2
                         )
 
                     cornerHandleView(sx: 1, sy: 1)
                         .offset(
-                            x: (width * liveScale)/2,
-                            y: (height * liveScale)/2
+                            x: (width * viewModel.liveScale)/2,
+                            y: (height * viewModel.liveScale)/2
                         )
                 }
 
@@ -168,14 +145,14 @@ struct SelectableCanvasLayerView: View {
 
                             let frame = geo.frame(in: .global)
 
-                            layerCenter = CGPoint(
+                            viewModel.layerCenter = CGPoint(
                                 x: frame.midX,
                                 y: frame.midY
                             )
                         }
                         .onChange(of: geo.frame(in: .global)) { _, newFrame in
 
-                            layerCenter = CGPoint(
+                            viewModel.layerCenter = CGPoint(
                                 x: newFrame.midX,
                                 y: newFrame.midY
                             )
@@ -189,8 +166,8 @@ struct SelectableCanvasLayerView: View {
                 Angle(degrees: layer.rotation)
             )
             .position(
-                x: CGFloat(layer.positionX) + liveDrag.width,
-                y: CGFloat(layer.positionY) + liveDrag.height
+                x: CGFloat(layer.positionX) + viewModel.liveDrag.width,
+                y: CGFloat(layer.positionY) + viewModel.liveDrag.height
             )
             .gesture(dragGesture)
 
@@ -226,21 +203,21 @@ struct SelectableCanvasLayerView: View {
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                if !didSelectInCurrentDrag {
-                    didSelectInCurrentDrag = true
+                if !viewModel.didSelectInCurrentDrag {
+                    viewModel.didSelectInCurrentDrag = true
                     if !isSelected {
                         onSelect()
                     }
                     beginInteraction()
                 }
 
-                liveDrag = value.translation
+                viewModel.liveDrag = value.translation
             }
             .onEnded { value in
                 layer.positionX += Double(value.translation.width)
                 layer.positionY += Double(value.translation.height)
-                liveDrag = .zero
-                didSelectInCurrentDrag = false
+                viewModel.liveDrag = .zero
+                viewModel.didSelectInCurrentDrag = false
                 endInteraction()
                 onGestureEnd()
             }
@@ -286,11 +263,11 @@ struct SelectableCanvasLayerView: View {
     private func resizeGesture(sx: Double, sy: Double) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                if resizeBaseSize == nil {
-                    resizeBaseSize = CGSize(width: layer.width, height: layer.height)
+                if viewModel.resizeBaseSize == nil {
+                    viewModel.resizeBaseSize = CGSize(width: layer.width, height: layer.height)
                     beginInteraction()
                 }
-                guard let base = resizeBaseSize else { return }
+                guard let base = viewModel.resizeBaseSize else { return }
 
                 let radians = layer.rotation * .pi / 180
                 let cosT = cos(radians)
@@ -309,14 +286,14 @@ struct SelectableCanvasLayerView: View {
                 let newCornerY = sy * hh + localDy
                 let newDistance = sqrt(newCornerX * newCornerX + newCornerY * newCornerY)
 
-                liveScale = max(CGFloat(newDistance / startDistance), 0.15)
+                viewModel.liveScale = max(CGFloat(newDistance / startDistance), 0.15)
             }
             .onEnded { _ in
-                guard let base = resizeBaseSize else { return }
-                layer.width = max(minLayerSize, base.width * Double(liveScale))
-                layer.height = max(minLayerSize, base.height * Double(liveScale))
-                liveScale = 1.0
-                resizeBaseSize = nil
+                guard let base = viewModel.resizeBaseSize else { return }
+                layer.width = max(viewModel.minLayerSize, base.width * Double(viewModel.liveScale))
+                layer.height = max(viewModel.minLayerSize, base.height * Double(viewModel.liveScale))
+                viewModel.liveScale = 1.0
+                viewModel.resizeBaseSize = nil
                 endInteraction()
                 onGestureEnd()
             }
@@ -332,33 +309,33 @@ struct SelectableCanvasLayerView: View {
     private func rotateGesture() -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .global)
             .onChanged { value in
-                if rotationStartAngle == nil {
-                    rotationStartAngle = layer.rotation
-                    rotationStartFingerAngle = atan2(
-                        value.startLocation.y - layerCenter.y,
-                        value.startLocation.x - layerCenter.x
+                if viewModel.rotationStartAngle == nil {
+                    viewModel.rotationStartAngle = layer.rotation
+                    viewModel.rotationStartFingerAngle = atan2(
+                        value.startLocation.y - viewModel.layerCenter.y,
+                        value.startLocation.x - viewModel.layerCenter.x
                     )
                     beginInteraction()
                 }
 
                 guard
-                    let startRotation = rotationStartAngle,
-                    let startFingerAngle = rotationStartFingerAngle
+                    let startRotation = viewModel.rotationStartAngle,
+                    let startFingerAngle = viewModel.rotationStartFingerAngle
                 else {
                     return
                 }
 
                 let currentFingerAngle = atan2(
-                    value.location.y - layerCenter.y,
-                    value.location.x - layerCenter.x
+                    value.location.y - viewModel.layerCenter.y,
+                    value.location.x - viewModel.layerCenter.x
                 )
 
                 let delta = currentFingerAngle - startFingerAngle
                 layer.rotation = startRotation + delta * 180 / .pi
             }
             .onEnded { _ in
-                rotationStartAngle = nil
-                rotationStartFingerAngle = nil
+                viewModel.rotationStartAngle = nil
+                viewModel.rotationStartFingerAngle = nil
 
                 endInteraction()
                 onGestureEnd()

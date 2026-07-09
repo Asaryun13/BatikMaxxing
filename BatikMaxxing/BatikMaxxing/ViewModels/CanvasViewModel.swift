@@ -3,7 +3,7 @@
 //  BatikMaxxing
 //
 //  Created by Liecardo on 05/07/26.
-//
+//  Edited by Asaryun on 09/07/26
 
 //  State & logic untuk CanvasView: rename, tambah foto badan (choose
 //  photo dari PhotosPicker), paste foto dari clipboard, dan buat canvas
@@ -32,6 +32,16 @@ final class CanvasViewModel {
         CGSize(width: canvasWidth, height: canvasHeight)
     }
 
+    // MARK: - Interactive View States (Moved from CanvasView for optimization)
+
+    var zoomScale: CGFloat = 1.0
+    var selectedLayerID: UUID?
+    
+    /// True persis selama ada layer yang sedang di-drag/resize/rotate.
+    /// Dipakai untuk menonaktifkan sementara pan gesture ZoomableScrollView
+    /// (lihat komentar di ZoomableScrollView.swift untuk alasannya).
+    var isInteractingWithLayer = false
+
     // MARK: - Rename flow
 
     var isRenamePresented = false
@@ -45,13 +55,6 @@ final class CanvasViewModel {
     // MARK: - Library sheet (visual placeholder untuk saat ini)
 
     var isLibrarySheetPresented = false
-
-    // MARK: - Seleksi layer
-
-    /// Di-set setiap kali layer baru berhasil ditambahkan (choose photo /
-    /// paste), supaya CanvasView bisa langsung memilihnya (auto-select)
-    /// sehingga handle resize/rotate langsung terlihat oleh user.
-    private(set) var lastAddedLayerID: UUID?
 
     // MARK: - Rename
 
@@ -119,7 +122,10 @@ final class CanvasViewModel {
         layer.canvas = project
         project.updatedAt = .now
         save(context)
-        lastAddedLayerID = layer.id
+        
+        // Layer yang baru saja ditambahkan (choose photo / paste) langsung
+        // auto-select, supaya handle resize/rotate langsung kelihatan.
+        selectedLayerID = layer.id
     }
 
     // MARK: - Paste dari clipboard (copy foto dari galeri, paste ke canvas)
@@ -151,7 +157,10 @@ final class CanvasViewModel {
         layer.canvas = project
         project.updatedAt = .now
         save(context)
-        lastAddedLayerID = layer.id
+        
+        // Layer yang baru saja ditambahkan (choose photo / paste) langsung
+        // auto-select, supaya handle resize/rotate langsung kelihatan.
+        selectedLayerID = layer.id
     }
 
     // MARK: - Persist perubahan dari gesture (resize/rotate/reposition)

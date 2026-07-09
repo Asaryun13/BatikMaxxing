@@ -3,7 +3,7 @@
 //  BatikMaxxing
 //
 //  Created by Liecardo on 04/07/26.
-//
+//  Edited by Asaryun on 09/07/26
 
 //  Editor canvas utama, mirip FreeForm. Fitur di step ini:
 //  - Navigasi canvas: zoom (10%–400%) & pan lewat ZoomableScrollView
@@ -21,7 +21,6 @@
 //  sengaja belum diimplementasikan — menyusul setelah fundamental ini
 //  stabil, sesuai kesepakatan.
 //
-
 import SwiftUI
 import SwiftData
 import PhotosUI
@@ -35,12 +34,6 @@ struct CanvasView: View {
     @Environment(\.undoManager) private var undoManager
 
     @State private var viewModel = CanvasViewModel()
-    @State private var zoomScale: CGFloat = 1.0
-    @State private var selectedLayerID: UUID?
-    /// True persis selama ada layer yang sedang di-drag/resize/rotate.
-    /// Dipakai untuk menonaktifkan sementara pan gesture ZoomableScrollView
-    /// (lihat komentar di ZoomableScrollView.swift untuk alasannya).
-    @State private var isInteractingWithLayer = false
 
     var body: some View {
         ZStack {
@@ -51,13 +44,13 @@ struct CanvasView: View {
                 contentSize: viewModel.canvasSize,
                 minZoom: 0.1,
                 maxZoom: 4.0,
-                currentZoom: $zoomScale,
-                isInteractionDisabled: isInteractingWithLayer
+                currentZoom: $viewModel.zoomScale,
+                isInteractionDisabled: viewModel.isInteractingWithLayer
             ) {
                 CanvasContentView(
                     canvasSize: viewModel.canvasSize,
                     layers: project.layers,
-                    selectedLayerID: selectedLayerID,
+                    selectedLayerID: viewModel.selectedLayerID,
                     onChoosePhoto: {
                         viewModel.isPhotoPickerPresented = true
                     },
@@ -65,17 +58,17 @@ struct CanvasView: View {
                         viewModel.pasteImageFromClipboard(to: project, in: modelContext)
                     },
                     onSelectLayer: { id in
-                        selectedLayerID = id
+                        viewModel.selectedLayerID = id
                     },
                     onDeselect: {
-                        selectedLayerID = nil
+                        viewModel.selectedLayerID = nil
                     },
                     onLayerGestureEnd: {
                         project.updatedAt = .now
                         viewModel.persistLayerChanges(in: modelContext)
                     },
                     onLayerInteractionChange: { isInteracting in
-                        isInteractingWithLayer = isInteracting
+                        viewModel.isInteractingWithLayer = isInteracting
                     }
                 )
             }
@@ -96,11 +89,6 @@ struct CanvasView: View {
         )
         .onChange(of: viewModel.selectedPhotoItem) { _, newItem in
             viewModel.handlePickedPhoto(newItem, on: project, in: modelContext)
-        }
-        // Layer yang baru saja ditambahkan (choose photo / paste) langsung
-        // auto-select, supaya handle resize/rotate langsung kelihatan.
-        .onChange(of: viewModel.lastAddedLayerID) { _, newID in
-            selectedLayerID = newID
         }
         .alert("Rename Canvas", isPresented: $viewModel.isRenamePresented) {
             TextField("Name", text: $viewModel.renameText)
